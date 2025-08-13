@@ -33,7 +33,7 @@ public class GetAllExamConvertData {
 			e.printStackTrace();
 		}
 
-fdg
+
 	}
 	public static boolean deleteLocalTemp(File directory) {
 
