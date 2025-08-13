@@ -26,17 +26,15 @@ public class GetAllExamConvertData {
 		ResultSet rs=db.retrieveAllExamPath();
 		try {
 			while(rs.next()) {
-				pathV.add(rs.getString(1));
+				pathV.add(rs.getString(1));//main
+				pathV.add(rs.getString(1));//main
 			}
 		} catch (SQLException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-
-
 	}
 	public static boolean deleteLocalTemp(File directory) {
-
 		if (directory.exists()) {
 			File[] files = directory.listFiles();
 			if (null != files) {
