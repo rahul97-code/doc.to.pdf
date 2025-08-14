@@ -1,12 +1,13 @@
 package hms.main;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.Arrays;
 
-public class ReadFile {
+public class FileManager {
 
 	public String[] ReadFile() {
 		// TODO Auto-generated constructor stub
@@ -46,10 +47,32 @@ public class ReadFile {
 		}
 		return data;
 	}
+	
+	public static void createDir(String path) {
+	    File dir = new File(path);
+	    if (!dir.exists()) {
+	        dir.mkdirs();
+	    }
+	}
+	public static boolean deleteLocalTemp(File directory) {
+		if (directory.exists()) {
+			File[] files = directory.listFiles();
+			if (null != files) {
+				for (int i = 0; i < files.length; i++) {
+					if (files[i].isDirectory()) {
+						deleteLocalTemp(files[i]);
+					} else {
+						files[i].delete();
+					}
+				}
+			}
+		}
+		return (directory.delete());
+	}
 
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
-		ReadFile d=new ReadFile();
+		FileManager d=new FileManager();
 System.out.println(Arrays.toString(d.ReadFile()));
 	}
 

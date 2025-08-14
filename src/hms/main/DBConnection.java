@@ -41,7 +41,7 @@ public class DBConnection {
 //		DBConnection.closeConnection();
 	}
 	public DBConnection() {
-		server=new ReadFile().ReadFile()[0];
+		server=new FileManager().ReadFile()[0];
 		try {
 			Class.forName("com.mysql.jdbc.Driver");
 		} catch (ClassNotFoundException e) {

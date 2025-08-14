@@ -33,7 +33,7 @@ public class ExamDBConnection extends DBConnection {
 	}
 	
 	public ResultSet retrieveAllExamPath() {
-		String query = "SELECT CONCAT('/HMS/Patient/',exam_pid,'/Exam/',exam_id) as smbpath from exam_entery ee where doc_to_pdf ='0'";
+		String query = "SELECT CONCAT('/HMS/Patient/',exam_pid,'/Exam/',exam_id) as smbpath,exam_id as dir from exam_entery ee where doc_to_pdf ='0'";
 		try {
 			rs = statement.executeQuery(query);
 
@@ -44,11 +44,8 @@ public class ExamDBConnection extends DBConnection {
 		return rs;
 	}
 	
-	public void updateXrayExamData( String status,
-			String examOperator, String examPerformed,String studyID,String receiptID) throws Exception {
-		statement.executeUpdate("update `exam_entery` set `exam_performed` = '"
-				+ examPerformed + "',`exam_operator`='" + examOperator + "' ,`xray_study_id`='" + studyID +"' where `receipt_id` ='"
-				+ receiptID +"' and exam_room='10'");
+	public void updateExamDocPdfFlag(int exam_id) throws Exception {
+		statement.executeUpdate("update `exam_entery` set `doc_to_pdf` ='1' where `exam_id`='"+exam_id+"' ");
 	}
 	
 	public void UpdateLisData(String[] data,String index){
