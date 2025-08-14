@@ -32,6 +32,17 @@ public class ExamDBConnection extends DBConnection {
 		return rs;
 	}
 	
+	public void insertErrorLog(String errorText) {
+	    String sql = "INSERT INTO lis_debugging (problem, date_time,script_name) VALUES ("+errorText+", NOW(),'DOC_TO_PDF')";
+	    try  {
+	    	statement.executeUpdate(sql);
+	    } catch (SQLException e) {
+	        System.err.println("Error writing to error_logs table:");
+	        e.printStackTrace();
+	    }
+	}
+
+	
 	public ResultSet retrieveAllExamPath() {
 		String query = "SELECT CONCAT('/HMS/Patient/',exam_pid,'/Exam/',exam_id) as smbpath,exam_id as dir from exam_entery ee where doc_to_pdf ='0'";
 		try {

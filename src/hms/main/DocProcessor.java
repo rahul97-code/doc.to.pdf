@@ -4,6 +4,7 @@ import jcifs.smb.*;
 import java.io.*;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.PreparedStatement;
 import java.util.Vector;
 
 public class DocProcessor {
@@ -18,82 +19,103 @@ public class DocProcessor {
     static final String SMB_PASS = null;  // set your SMB password
     static final String DOMAIN = null;    // set your domain or null
 
-    // Hold local downloaded doc files for sequential conversion
     private Vector<FileToProcess> filesToConvert = new Vector<FileToProcess>();
 
     public static void main(String[] args) {
-        new DocProcessor().startProcessing();
+        while (true) {
+            try {
+                new DocProcessor().startProcessing();
+            } catch (Exception e) {
+                e.printStackTrace();
+                new DocProcessor().logErrorToDb("Fatal error in main loop", e);
+            }
+
+            try {
+                Thread.sleep(60000); // wait 60 seconds
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                new DocProcessor().logErrorToDb("Interrupted during sleep", e);
+            }
+        }
     }
 
     public void startProcessing() {
-    	new FileManager().deleteLocalTemp(new File(tempFolderPath));
-    	
-        getAllDocPath();
-        new FileManager().createDir(tempFolderPath);
-        createAllTempDir();
+        try {
+            new FileManager().deleteLocalTemp(new File(tempFolderPath));
+            getAllDocPath();
+            new FileManager().createDir(tempFolderPath);
+            createAllTempDir();
 
-        final NtlmPasswordAuthentication auth = new NtlmPasswordAuthentication(DOMAIN, SMB_USER, SMB_PASS);
+            final NtlmPasswordAuthentication auth = new NtlmPasswordAuthentication(DOMAIN, SMB_USER, SMB_PASS);
 
-        // 1. Download files from SMB in parallel
-        Vector<Thread> downloadThreads = new Vector<Thread>();
-        for (int i = 0; i < pathV.size(); i++) {
-            final String smbPath = mainDir + pathV.get(i) + "/";
-            final String localPath = tempFolderPath + "/" + dirV.get(i);
+            Vector<Thread> downloadThreads = new Vector<Thread>();
+            for (int i = 0; i < pathV.size(); i++) {
+                final String smbPath = mainDir + pathV.get(i) + "/";
+                final String localPath = tempFolderPath + "/" + dirV.get(i);
 
-            Thread t = new Thread(new Runnable() {
-                public void run() {
-                    downloadDocsFromSmb(smbPath, localPath, auth);
+                Thread t = new Thread(new Runnable() {
+                    public void run() {
+                        downloadDocsFromSmb(smbPath, localPath, auth);
+                    }
+                });
+
+                downloadThreads.add(t);
+                t.start();
+            }
+
+            for (int i = 0; i < downloadThreads.size(); i++) {
+                try {
+                    downloadThreads.get(i).join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    logErrorToDb("Interrupted during download join", e);
                 }
-            });
-            downloadThreads.add(t);
-            t.start();
-        }
-
-        // Wait for all downloads to finish
-        for (Thread t : downloadThreads) {
-            try {
-                t.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
-        }
 
-        System.out.println("All downloads completed. Starting sequential conversion...");
+            System.out.println("All downloads completed. Starting sequential conversion...");
 
-        // 2. Convert files sequentially
-        for (FileToProcess file : filesToConvert) {
-            try {
-                convertDocToPdf(file.localDocPath, file.localDir);
-            } catch (Exception e) {
-                System.err.println("Error converting: " + file.localDocPath);
-                e.printStackTrace();
-            }
-        }
-
-        System.out.println("All conversions completed. Starting uploads...");
-
-        // 3. Upload converted PDFs to SMB in parallel
-        Vector<Thread> uploadThreads = new Vector<Thread>();
-        for (FileToProcess file : filesToConvert) {
-            Thread t = new Thread(new Runnable() {
-                public void run() {
-                    uploadPdfToSmb(file, auth);
+            for (int i = 0; i < filesToConvert.size(); i++) {
+                FileToProcess file = filesToConvert.get(i);
+                try {
+                    convertDocToPdf(file.localDocPath, file.localDir);
+                } catch (Exception e) {
+                    System.err.println("Error converting: " + file.localDocPath);
+                    e.printStackTrace();
+                    logErrorToDb("Error converting DOC to PDF: " + file.localDocPath, e);
                 }
-            });
-            uploadThreads.add(t);
-            t.start();
-        }
-
-        // Wait for all uploads to finish
-        for (Thread t : uploadThreads) {
-            try {
-                t.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
             }
-        }
 
-        System.out.println("All uploads completed. Processing done.");
+            System.out.println("All conversions completed. Starting uploads...");
+
+            Vector<Thread> uploadThreads = new Vector<Thread>();
+            for (int i = 0; i < filesToConvert.size(); i++) {
+                final FileToProcess file = filesToConvert.get(i);
+
+                Thread t = new Thread(new Runnable() {
+                    public void run() {
+                        uploadPdfToSmb(file, auth);
+                    }
+                });
+
+                uploadThreads.add(t);
+                t.start();
+            }
+
+            for (int i = 0; i < uploadThreads.size(); i++) {
+                try {
+                    uploadThreads.get(i).join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    logErrorToDb("Interrupted during upload join", e);
+                }
+            }
+
+            System.out.println("All uploads completed. Processing done.");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            logErrorToDb("Unhandled error during startProcessing", e);
+        }
     }
 
     private void createAllTempDir() {
@@ -115,12 +137,12 @@ public class DocProcessor {
             }
         } catch (SQLException e) {
             e.printStackTrace();
+            logErrorToDb("SQL error while fetching doc paths", e);
         } finally {
             db.closeConnection();
         }
     }
 
-    // Downloads DOC/DOCX files from SMB folder to local folder; adds them to filesToConvert vector
     private void downloadDocsFromSmb(String smbPath, String localPath, NtlmPasswordAuthentication auth) {
         try {
             SmbFile smbDir = new SmbFile(smbPath, auth);
@@ -129,14 +151,13 @@ public class DocProcessor {
                 return;
             }
 
-            new FileManager().createDir(localPath); // Ensure local dir exists
-
+            new FileManager().createDir(localPath);
             SmbFile[] files = smbDir.listFiles();
+
             for (int i = 0; i < files.length; i++) {
                 SmbFile file = files[i];
                 if (file.isFile() && (file.getName().endsWith(".doc") || file.getName().endsWith(".docx"))) {
                     String localDocPath = currentDir + "/" + localPath + "/" + file.getName();
-                    // Download file
                     InputStream in = null;
                     OutputStream out = null;
                     try {
@@ -152,28 +173,27 @@ public class DocProcessor {
                         if (in != null) in.close();
                         if (out != null) out.close();
                     }
-                    synchronized(filesToConvert) {
-                    	int fileId = Integer.parseInt(dirV.get(i)); // assuming dirV holds IDs as strings
-                    	filesToConvert.add(new FileToProcess(file, localDocPath, currentDir + "/" + localPath, fileId));
+
+                    synchronized (filesToConvert) {
+                        int fileId = Integer.parseInt(dirV.get(i));
+                        filesToConvert.add(new FileToProcess(file, localDocPath, currentDir + "/" + localPath, fileId));
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Error downloading from SMB path: " + smbPath);
             e.printStackTrace();
+            logErrorToDb("Error downloading from SMB: " + smbPath, e);
         }
     }
 
-    // Upload PDF back to SMB
     private void uploadPdfToSmb(FileToProcess file, NtlmPasswordAuthentication auth) {
         try {
             String pdfFileName = file.smbFile.getName().replaceAll("\\.docx?$", ".pdf");
             String localPdfPath = file.localDir + "/" + pdfFileName;
-            System.out.println(file.localDir+" ikusdhgu");
 
             File pdfFile = new File(localPdfPath);
             if (!pdfFile.exists()) {
-                System.err.println("PDF file not found, skipping upload: " + localPdfPath);
+                System.err.println("PDF not found: " + localPdfPath);
                 return;
             }
 
@@ -189,7 +209,7 @@ public class DocProcessor {
                     out.write(buffer, 0, len);
                 }
                 System.out.println("Uploaded: " + pdfFileName);
-                
+
                 ExamDBConnection db = new ExamDBConnection();
                 db.updateExamDocPdfFlag(file.fileId);
                 db.closeConnection();
@@ -197,13 +217,13 @@ public class DocProcessor {
                 if (in != null) in.close();
                 if (out != null) out.close();
             }
+
         } catch (Exception e) {
-            System.err.println("Error uploading PDF: " + file.smbFile.getName());
             e.printStackTrace();
+            logErrorToDb("Error uploading PDF: " + file.smbFile.getName(), e);
         }
     }
 
-    // Convert DOC/DOCX to PDF via LibreOffice CLI (runs synchronously)
     public static void convertDocToPdf(String inputFilePath, String outputDir) throws IOException, InterruptedException {
         System.out.println("Converting: " + inputFilePath + " → PDF in: " + outputDir);
 
@@ -216,10 +236,9 @@ public class DocProcessor {
             "--outdir", outputDir
         };
 
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.environment().putAll(System.getenv());
-
-        Process process = processBuilder.start();
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.environment().putAll(System.getenv());
+        Process process = pb.start();
 
         BufferedReader stdOut = new BufferedReader(new InputStreamReader(process.getInputStream()));
         BufferedReader stdErr = new BufferedReader(new InputStreamReader(process.getErrorStream()));
@@ -240,6 +259,23 @@ public class DocProcessor {
         }
     }
 
+    private void logErrorToDb(String message, Exception e) {
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        e.printStackTrace(pw);
+        String stackTrace = sw.toString();
+        String fullError = message + "\n" + stackTrace;
+
+        try {
+            ExamDBConnection db = new ExamDBConnection();
+            db.insertErrorLog(fullError);
+            db.closeConnection();
+        } catch (Exception dbEx) {
+            System.err.println("Failed to log error to DB:");
+            dbEx.printStackTrace();
+        }
+    }
+
     private static class FileToProcess {
         public SmbFile smbFile;
         public String localDocPath;
@@ -253,5 +289,4 @@ public class DocProcessor {
             this.fileId = fileId;
         }
     }
-
 }
